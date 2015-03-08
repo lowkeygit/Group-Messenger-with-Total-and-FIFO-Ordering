@@ -14,16 +14,13 @@ import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
 
-import java.io.BufferedInputStream;
 import java.io.ObjectInputStream;
-import java.io.ObjectOutput;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.net.InetAddress;
@@ -32,7 +29,6 @@ import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
  * GroupMessengerActivity is the main Activity for the assignment.
@@ -180,104 +176,95 @@ public class GroupMessengerActivity extends Activity {
                     Socket socket = serverSocket.accept();
                     InputStream read = socket.getInputStream();
 //                    InputStreamReader reader = new InputStreamReader(read);
-                    StringBuffer buffer = new StringBuffer();
+//                    StringBuffer buffer = new StringBuffer();
                     ObjectInputStream io = new ObjectInputStream(read);
-                    Transfer obj = null;
+                    Normal objMessage = null;
+                    Agreed objAgreement = null;
+                    Proposal objProposal = null;
                     try {
-                        obj = (Transfer) io.readObject();
+                        Object obj = io.readObject();
+                        if(obj instanceof Normal)
+                            objMessage = (Normal)obj;
+                        if(obj instanceof Proposal)
+                            objProposal = (Proposal)obj;
+                        if(obj instanceof Agreed)
+                            objAgreement = (Agreed)obj;
                     }
                     catch(ClassNotFoundException ex)
                     {
                         Log.v(TAG,"Class Not found when read the object ::"+ex.getMessage());
                     }
-                    if(obj != null)
-                        Log.v(TAG, "Not Null Object");
-//                    BufferedInputStream buff = new BufferedInputStream(read);
-//                    byte[] bb = new byte[128];
-//                    buff.read(bb,0,128);
-//                    int data = reader.read();
-//                    while(data != -1)
-//                    {
-//                        buffer.append((char)data);
-//                        data = reader.read();
-//                    }
-//                    reader.close();
 
-//                    publishProgress(buffer.toString());
-//                    String[] msg = buffer.toString().split(indentifier);
-//                    String mm = new String(bb);
-//                    buff.close();
-//                    String[] msg = mm.split(indentifier);
-//                    //If this process receives a normal message
-//                    if(!msg[0].equals("order") && !msg[0].equals("finalOrder"))
-//                    {
-//                        String id = msg[0];
-//                        String portNum = id.split("-")[0];
-//                        String val = msg[1];
-//                        double propNum = ++proposalNum + uniqueIden;
-//
-//                        if(!holdBackMap.containsKey(id))
-//                        {
-//                            holdBackMap.put(id, val);
-//                            prioritySet.add(new Message(id, propNum, false));
-//                        }
-//
-//                        String proposeMsg = "order" + indentifier + id + indentifier + propNum;
-//                        unicast(proposeMsg, portNum);
-//                    }
-//                    else if(msg[0].equals("order"))
-//                    {
-//                        double priorityNum = Double.parseDouble(msg[2]);
-//
-//                        if(!proposedMap.containsKey(msg[1]))
-//                        {
-//                            proposedMap.put(msg[1], 1);
-//                            maxPriorityMap.put(msg[1], priorityNum);
-//                        }
-//                        else
-//                        {
-//                            proposedMap.put(msg[1], proposedMap.get(msg[1]) + 1);
-//                            if(maxPriorityMap.get(msg[1]) < priorityNum)
-//                                maxPriorityMap.put(msg[1], priorityNum);
-//                        }
-//
-//                        if(proposedMap.get(msg[1]) == 5)
-//                        {
-//                            String proposeMsg = "finalOrder" + indentifier + msg[1] + indentifier + maxPriorityMap.get(msg[1]);
-//                            multicast(proposeMsg);
-//                        }
-//                    }
-//
-//                    else if(msg[0].equals("finalOrder"))
-//                    {
-//                        Message m = new Message(msg[1], Double.parseDouble(msg[2]), true);
-//                        Iterator<Message> it = prioritySet.iterator();
-//                        while(it.hasNext())
-//                        {
-//                            Message temp = it.next();
-//                            if(temp.id.equals(m.id))
-//                            {
-//                                if(prioritySet.remove(temp))
-//                                    prioritySet.add(m);
-//
-//                                break;
-//                            }
-//                        }
-//
-//                        it = prioritySet.iterator();
-//                        while(it.hasNext())
-//                        {
-//                            Message temp = it.next();
-//                            if(deliveryCount + 1 == (int)temp.priorityNum)
-//                                if(prioritySet.remove(temp))
-//                                {
-//                                    deliveryCount++;
-//                                    publishProgress(new String[]{holdBackMap.get(msg[1]), deliveryCount+""});
-//                                }
-//                        }
-//                    }
+                    if(objMessage != null)
+                    {
+                        String id = objMessage.id;
+                        String portNum = id.split("-")[0];
+                        String val = objMessage.message;
+                        double propNum = ++proposalNum + uniqueIden;
 
+                        if(!holdBackMap.containsKey(id))
+                        {
+                            holdBackMap.put(id, val);
+                            prioritySet.add(new Message(id, propNum, false));
+                        }
 
+                        Proposal objProposed = new Proposal(id,propNum,portNum);
+                        new ProposalClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, objProposed);
+                    }
+
+                    else if(objProposal != null)
+                    {
+                        double priorityNum = objProposal.proposedNum;
+
+                        if(!proposedMap.containsKey(objProposal.id))
+                        {
+                            proposedMap.put(objProposal.id, 1);
+                            maxPriorityMap.put(objProposal.id, priorityNum);
+                        }
+
+                        else
+                        {
+                            proposedMap.put(objProposal.id, proposedMap.get(objProposal.id) + 1);
+                            if(maxPriorityMap.get(objProposal.id) < priorityNum)
+                                maxPriorityMap.put(objProposal.id, priorityNum);
+                        }
+
+                        if(proposedMap.get(objProposal.id) == 5)
+                        {
+                            Agreed objAgreed = new Agreed(objProposal.id, maxPriorityMap.get(objProposal.id));
+                            new AgreementClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, objAgreed);
+                        }
+                    }
+
+                    else  if(objAgreement != null)
+                    {
+                        Message m = new Message(objAgreement.id, objAgreement.agreedNumber, true);
+                        Iterator<Message> it = prioritySet.iterator();
+                        while(it.hasNext())
+                        {
+                            Message temp = it.next();
+                            if(temp.id.equals(m.id))
+                            {
+                                if(prioritySet.remove(temp))
+                                    prioritySet.add(m);
+
+                                break;
+                            }
+                        }
+
+                        it = prioritySet.iterator();
+                        while(it.hasNext())
+                        {
+                            Message temp = it.next();
+                            if(!temp.isFinalProposed) break;
+
+                            if(prioritySet.remove(temp))
+                            {
+                                deliveryCount++;
+                                publishProgress(new String[]{holdBackMap.get(objAgreement.id), deliveryCount+""});
+                            }
+                        }
+                    }
                     socket.close();
                 }
             }
@@ -340,26 +327,79 @@ public class GroupMessengerActivity extends Activity {
         protected Void doInBackground(String... msgs) {
             try {
                 String id = myPort+"-"+counter++;
-//                Socket socket;
                 String msgToSend = msgs[0];
-//                msgToSend = id + indentifier + msgToSend;
-//                OutputStream out;
-//                OutputStreamWriter writer;
-//                Iterator<String> it = remotePortList.iterator();
-//                while(it.hasNext())
-//                {
-//                    socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-//                            Integer.parseInt(it.next()));
-//                    out = socket.getOutputStream();
-//                    writer = new OutputStreamWriter(out);
-//                    writer.write(msgToSend);
-//                    writer.flush();
-//                    writer.close();
-//                    socket.close();
-//                }
-//                deliveryMap.put(id, msgToSend);
-                multicast(new Transfer(id, msgToSend, "Normal"));
-//                //--------My Code Ends
+                Normal objTransfer = new Normal(id,msgToSend);
+                Socket socket;
+                OutputStream out;
+                ObjectOutputStream writer;
+                Iterator<String> it = remotePortList.iterator();
+                while (it.hasNext()) {
+                    socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                            Integer.parseInt(it.next()));
+                    out = socket.getOutputStream();
+                    writer = new ObjectOutputStream(out);
+                    writer.writeObject(objTransfer);
+                    writer.close();
+                    out.close();
+                    socket.close();
+                }
+            } catch (UnknownHostException e) {
+                Log.e(TAG, "ClientTask UnknownHostException");
+            } catch (IOException e) {
+                Log.e(TAG, "ClientTask socket IOException");
+            }
+
+            return null;
+        }
+    }
+    private class AgreementClientTask extends AsyncTask<Agreed, Void, Void> {
+
+        @Override
+        protected Void doInBackground(Agreed... msgs) {
+            try {
+
+                Agreed objTransfer = msgs[0];
+                Socket socket;
+                OutputStream out;
+                ObjectOutputStream writer;
+                Iterator<String> it = remotePortList.iterator();
+                while (it.hasNext()) {
+                    socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                            Integer.parseInt(it.next()));
+                    out = socket.getOutputStream();
+                    writer = new ObjectOutputStream(out);
+                    writer.writeObject(objTransfer);
+                    writer.close();
+                    out.close();
+                    socket.close();
+                }
+            } catch (UnknownHostException e) {
+                Log.e(TAG, "ClientTask UnknownHostException");
+            } catch (IOException e) {
+                Log.e(TAG, "ClientTask socket IOException");
+            }
+
+            return null;
+        }
+    }
+    private class ProposalClientTask extends AsyncTask<Proposal, Void, Void> {
+
+        @Override
+        protected Void doInBackground(Proposal... msgs) {
+            try {
+                Proposal objProposed = msgs[0];
+
+                Socket socket;
+                OutputStream out;
+                ObjectOutputStream writer;
+                socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                        Integer.parseInt(objProposed.portNum));
+                out = socket.getOutputStream();
+                writer = new ObjectOutputStream(out);
+                writer.writeObject(objProposed);
+                writer.close();
+                out.close();
+                socket.close();
             } catch (UnknownHostException e) {
                 Log.e(TAG, "ClientTask UnknownHostException");
             } catch (IOException e) {
@@ -370,33 +410,7 @@ public class GroupMessengerActivity extends Activity {
         }
     }
 
-    public class Message implements Comparable
-    {
-        String id;
-        double priorityNum;
-        boolean isFinalProposed;
-
-        public Message(String id, double priorityNum, boolean isFinalProposed)
-        {
-            this.id = id;
-            this.priorityNum = priorityNum;
-            this.isFinalProposed = isFinalProposed;
-        }
-
-        @Override
-        public int compareTo(Object o1)
-        {
-            Message temp = (Message)o1;
-            if(this.priorityNum < temp.priorityNum)
-                return -1;
-            else if(this.priorityNum == temp.priorityNum)
-                return 0;
-            else
-                return 1;
-        }
-    }
-
-    public class PQueueComaparator implements Comparator<Message>
+    class PQueueComaparator implements Comparator<Message>
     {
         @Override
         public int compare(Message lhs, Message rhs) {
@@ -408,69 +422,20 @@ public class GroupMessengerActivity extends Activity {
                 return 1;
         }
     }
-
-    private void multicast(Transfer msgToSend) throws IOException, UnknownHostException
-    {
-        try {
-            Socket socket;
-            OutputStream out;
-            OutputStreamWriter writer;
-
-            ObjectOutputStream write;
-
-            Iterator<String> it = remotePortList.iterator();
-            while (it.hasNext()) {
-                socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-                        Integer.parseInt(it.next()));
-                out = socket.getOutputStream();
-//                writer = new OutputStreamWriter(out);
-                write = new ObjectOutputStream(out);
-                write.writeObject(msgToSend);
-                write.close();;
-                out.close();
-//                writer.write(msgToSend);
-//                writer.flush();
-//                writer.close();
-                socket.close();
-            }
-        }
-        catch (UnknownHostException e) {
-            Log.e(TAG, "Multicast ClientTask UnknownHostException");
-        } catch (IOException e) {
-            Log.e(TAG, "Multicast ClientTask socket IOException");
-        }
-    }
-
-    private void unicast(String msg, String portNum)
-    {
-        try {
-            Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-                    Integer.parseInt(portNum));
-            OutputStream out = socket.getOutputStream();
-            OutputStreamWriter writer = new OutputStreamWriter(out);
-            writer.write(msg);
-            writer.flush();
-            writer.close();
-            socket.close();
-        }
-        catch (UnknownHostException e) {
-            Log.e(TAG, "Unicast ClientTask UnknownHostException");
-        } catch (IOException e) {
-            Log.e(TAG, "Unicast ClientTask socket IOException");
-        }
-    }
 }
 
-class Transfer implements Serializable
-{
-    private static final long serialVersionUID = 1L;
-    String id;
-    String message;
-    String type;
-    public Transfer(String id, String message, String type)
-    {
-        this.id = id;
-        this.message = message;
-        this.type = type;
-    }
-}
+
+
+
+//                    BufferedInputStream buff = new BufferedInputStream(read);
+//                    byte[] bb = new byte[128];
+//                    buff.read(bb,0,128);
+//                    int data = reader.read();
+//                    while(data != -1)
+//                    {
+//                        buffer.append((char)data);
+//                        data = reader.read();
+//                    }
+//                    reader.close();
+
+//                    publishProgress(buffer.toString());
