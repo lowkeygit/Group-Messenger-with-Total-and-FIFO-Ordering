@@ -1,6 +1,7 @@
 package edu.buffalo.cse.cse486586.groupmessenger2;
 
 import java.util.Comparator;
+import java.util.Timer;
 
 /**
  * Created by sherlock on 3/8/15.
@@ -10,12 +11,16 @@ public class Message implements Comparable
     String id;
     double priorityNum;
     boolean isFinalProposed;
+    int order;
+    String msg;
 
-    public Message(String id, double priorityNum, boolean isFinalProposed)
+    public Message(String id, double priorityNum, boolean isFinalProposed, int order, String msg)
     {
         this.id = id;
         this.priorityNum = priorityNum;
         this.isFinalProposed = isFinalProposed;
+        this.order = order;
+        this.msg = msg;
     }
 
     @Override

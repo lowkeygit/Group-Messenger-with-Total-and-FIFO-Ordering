@@ -16,13 +16,13 @@ import android.widget.TextView;
 
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.io.Serializable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.io.FileOutputStream;
+
+import java.util.concurrent.*;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.OutputStreamWriter;
+
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -40,19 +40,21 @@ public class GroupMessengerActivity extends Activity {
 
     static private int deliveryCount = 0;
     static private int proposalNum = 0;
+    private int counter = 0;
+
     static TreeSet<Message> prioritySet = new TreeSet<Message>();
-    static ConcurrentHashMap<String, String> holdBackMap = new ConcurrentHashMap<String, String>();
-    HashMap<String, String> remotePortMap;
+    static ConcurrentHashMap<String, Message> holdBackMap = new ConcurrentHashMap<String, Message>();
+    static HashMap<String, Integer> fifoVector = new HashMap<>();
     static HashMap<String, Integer> proposedMap = new HashMap<String, Integer>();
     static HashMap<String, Double> maxPriorityMap = new HashMap<String, Double>();
-    static HashMap<String, String> deliveryMap = new HashMap<>();
+    static HashMap<String, PriorityQueue<Message>> fifoOrderQueue = new HashMap<String, PriorityQueue<Message>>();
+    static HashMap<String, Timer> timerMap = new HashMap<String, Timer>();
 
     private Uri myUri = null;
-    private static final String AUTHORITY = "edu.buffalo.cse.cse486586.groupmessenger1.provider";
+    private static final String AUTHORITY = "edu.buffalo.cse.cse486586.groupmessenger2.provider";
     private static final String SCHEME = "content";
-
-    private int counter = 0;
     static final String TAG = GroupMessengerActivity.class.getSimpleName();
+
     ArrayList<String> remotePortList = null;
     static final String REMOTE_PORT0 = "11108";
     static final String REMOTE_PORT1 = "11112";
@@ -63,9 +65,8 @@ public class GroupMessengerActivity extends Activity {
     static final int SERVER_PORT = 10000;
     static String myPort;
     TextView tv = null;
-
-    private final String indentifier = "mimanshu";
     private static double uniqueIden;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -78,12 +79,18 @@ public class GroupMessengerActivity extends Activity {
         remotePortList.add(REMOTE_PORT3);
         remotePortList.add(REMOTE_PORT4);
 
-        remotePortMap = new HashMap<String, String>();
-        remotePortMap.put("5554", "11108");
-        remotePortMap.put("5556", "11112");
-        remotePortMap.put("5558", "11116");
-        remotePortMap.put("5560", "11120");
-        remotePortMap.put("5562", "11124");
+        PriorityQueue<Message> queue = new PriorityQueue<Message>(10, new FifoComaparator());
+        fifoOrderQueue.put(REMOTE_PORT0, queue);
+        fifoOrderQueue.put(REMOTE_PORT1, queue);
+        fifoOrderQueue.put(REMOTE_PORT2, queue);
+        fifoOrderQueue.put(REMOTE_PORT3, queue);
+        fifoOrderQueue.put(REMOTE_PORT4, queue);
+
+        fifoVector.put(REMOTE_PORT0, 0);
+        fifoVector.put(REMOTE_PORT1, 0);
+        fifoVector.put(REMOTE_PORT2, 0);
+        fifoVector.put(REMOTE_PORT3, 0);
+        fifoVector.put(REMOTE_PORT4, 0);
 
         TelephonyManager tel = (TelephonyManager) this.getSystemService(Context.TELEPHONY_SERVICE);
         String portStr = tel.getLine1Number().substring(tel.getLine1Number().length() - 4);
@@ -175,8 +182,6 @@ public class GroupMessengerActivity extends Activity {
                 {
                     Socket socket = serverSocket.accept();
                     InputStream read = socket.getInputStream();
-//                    InputStreamReader reader = new InputStreamReader(read);
-//                    StringBuffer buffer = new StringBuffer();
                     ObjectInputStream io = new ObjectInputStream(read);
                     Normal objMessage = null;
                     Agreed objAgreement = null;
@@ -204,8 +209,12 @@ public class GroupMessengerActivity extends Activity {
 
                         if(!holdBackMap.containsKey(id))
                         {
-                            holdBackMap.put(id, val);
-                            prioritySet.add(new Message(id, propNum, false));
+                            Message temp = new Message(id, propNum, false, objMessage.sendOrder, val);
+                            holdBackMap.put(id, temp);
+                            prioritySet.add(temp);
+                            Timer time = new Timer();
+                            time.schedule(new failureHandler(id), 1000);
+                            timerMap.put(id,time);
                         }
 
                         Proposal objProposed = new Proposal(id,propNum,portNum);
@@ -238,30 +247,47 @@ public class GroupMessengerActivity extends Activity {
 
                     else  if(objAgreement != null)
                     {
-                        Message m = new Message(objAgreement.id, objAgreement.agreedNumber, true);
+                        Message m = new Message(objAgreement.id, objAgreement.agreedNumber, true,0,"");
+                        Timer time = timerMap.get(objAgreement.id);
+                        time.cancel();
                         Iterator<Message> it = prioritySet.iterator();
                         while(it.hasNext())
                         {
                             Message temp = it.next();
                             if(temp.id.equals(m.id))
                             {
-                                if(prioritySet.remove(temp))
-                                    prioritySet.add(m);
-
+                                it.remove();
+                                m.order = temp.order;
+                                m.msg = temp.msg;
+                                prioritySet.add(m);
                                 break;
                             }
                         }
-
                         it = prioritySet.iterator();
                         while(it.hasNext())
                         {
                             Message temp = it.next();
                             if(!temp.isFinalProposed) break;
-
-                            if(prioritySet.remove(temp))
+                            it.remove();
+                            String process = temp.id.split("-")[0];
+                            if(fifoOrderQueue.containsKey(process))
                             {
-                                deliveryCount++;
-                                publishProgress(new String[]{holdBackMap.get(objAgreement.id), deliveryCount+""});
+                                PriorityQueue<Message> queue = fifoOrderQueue.get(process);
+                                queue.add(temp);
+
+                                Message last = queue.peek();
+                                if(fifoVector.containsKey(process))
+                                {
+                                    int lastCount  = fifoVector.get(process);
+                                    if(lastCount + 1 == last.order)
+                                    {
+                                        last = queue.remove();
+                                        fifoOrderQueue.put(process, queue);
+                                        fifoVector.put(process, lastCount + 1);
+                                        publishProgress(new String[]{holdBackMap.get(last.id).msg, deliveryCount+""});
+                                        deliveryCount++;
+                                    }
+                                }
                             }
                         }
                     }
@@ -295,22 +321,38 @@ public class GroupMessengerActivity extends Activity {
              * For more information on file I/O on Android, please take a look at
              * http://developer.android.com/training/basics/data-storage/files.html
              */
-
-            String filename = "SimpleMessengerOutput";
-            String string = strReceived + "\n";
-            FileOutputStream outputStream;
-
-            try {
-                outputStream = openFileOutput(filename, Context.MODE_PRIVATE);
-                outputStream.write(string.getBytes());
-                outputStream.close();
-            } catch (Exception e) {
-                Log.e(TAG, "File write failed");
-            }
+//
+//            String filename = "SimpleMessengerOutput";
+//            String string = strReceived + "\n";
+//            FileOutputStream outputStream;
+//
+//            try {
+//                outputStream = openFileOutput(filename, Context.MODE_PRIVATE);
+//                outputStream.write(string.getBytes());
+//                outputStream.close();
+//            } catch (Exception e) {
+//                Log.e(TAG, "File write failed");
+//            }
 
             return;
         }
 
+    }
+
+    private class failureHandler extends TimerTask
+    {
+        String msgId;
+        public failureHandler(String id)
+        {
+            msgId = id;
+        }
+
+        @Override
+        public void run() {
+            Message temp = holdBackMap.get(msgId);
+            prioritySet.remove(temp);
+            tv.append("Process Failed "+msgId);
+        }
     }
 
     /***
@@ -325,15 +367,16 @@ public class GroupMessengerActivity extends Activity {
 
         @Override
         protected Void doInBackground(String... msgs) {
-            try {
-                String id = myPort+"-"+counter++;
-                String msgToSend = msgs[0];
-                Normal objTransfer = new Normal(id,msgToSend);
-                Socket socket;
-                OutputStream out;
-                ObjectOutputStream writer;
-                Iterator<String> it = remotePortList.iterator();
-                while (it.hasNext()) {
+
+            String id = myPort+"-"+ ++counter;
+            String msgToSend = msgs[0];
+            Normal objTransfer = new Normal(id,msgToSend,counter);
+            Socket socket;
+            OutputStream out;
+            ObjectOutputStream writer;
+            Iterator<String> it = remotePortList.iterator();
+            while (it.hasNext()) {
+                try {
                     socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                             Integer.parseInt(it.next()));
                     out = socket.getOutputStream();
@@ -343,12 +386,12 @@ public class GroupMessengerActivity extends Activity {
                     out.close();
                     socket.close();
                 }
-            } catch (UnknownHostException e) {
-                Log.e(TAG, "ClientTask UnknownHostException");
-            } catch (IOException e) {
-                Log.e(TAG, "ClientTask socket IOException");
+                catch (UnknownHostException e) {
+                    Log.e(TAG, "ClientTask UnknownHostException");
+                } catch (IOException e) {
+                    Log.e(TAG, "ClientTask socket IOException");
+                }
             }
-
             return null;
         }
     }
@@ -356,29 +399,27 @@ public class GroupMessengerActivity extends Activity {
 
         @Override
         protected Void doInBackground(Agreed... msgs) {
-            try {
-
                 Agreed objTransfer = msgs[0];
                 Socket socket;
                 OutputStream out;
                 ObjectOutputStream writer;
                 Iterator<String> it = remotePortList.iterator();
                 while (it.hasNext()) {
-                    socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-                            Integer.parseInt(it.next()));
-                    out = socket.getOutputStream();
-                    writer = new ObjectOutputStream(out);
-                    writer.writeObject(objTransfer);
-                    writer.close();
-                    out.close();
-                    socket.close();
+                    try {
+                        socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                                Integer.parseInt(it.next()));
+                        out = socket.getOutputStream();
+                        writer = new ObjectOutputStream(out);
+                        writer.writeObject(objTransfer);
+                        writer.close();
+                        out.close();
+                        socket.close();
+                    } catch (UnknownHostException e) {
+                        Log.e(TAG, "ClientTask UnknownHostException");
+                    } catch (IOException e) {
+                        Log.e(TAG, "ClientTask socket IOException");
+                    }
                 }
-            } catch (UnknownHostException e) {
-                Log.e(TAG, "ClientTask UnknownHostException");
-            } catch (IOException e) {
-                Log.e(TAG, "ClientTask socket IOException");
-            }
-
             return null;
         }
     }
@@ -410,13 +451,26 @@ public class GroupMessengerActivity extends Activity {
         }
     }
 
-    class PQueueComaparator implements Comparator<Message>
+    static class PQueueComaparator implements Comparator<Message>
     {
         @Override
         public int compare(Message lhs, Message rhs) {
             if(lhs.priorityNum < rhs.priorityNum)
                 return -1;
             else if(lhs.priorityNum == rhs.priorityNum)
+                return 0;
+            else
+                return 1;
+        }
+    }
+
+    static class FifoComaparator implements Comparator<Message>
+    {
+        @Override
+        public int compare(Message lhs, Message rhs) {
+            if(lhs.order < rhs.order)
+                return -1;
+            else if(lhs.order == rhs.order)
                 return 0;
             else
                 return 1;
